@@ -6,6 +6,8 @@ from scipy import misc
 import tensorflow as tf
 import numpy as np
 from sklearn import neighbors
+from sklearn.svm import SVC
+from sklearn.cluster import KMeans
 import sys
 import os
 import copy
@@ -16,7 +18,7 @@ import align.detect_face
 
 
 
-def train(train_dir,facenet_model='models/pretrained/graph.pb', model_save_path=None, 
+def train(train_dir,facenet_model='models/pretrained/graph.pb', model_save_path=None, classifier = 'KNN', 
     n_neighbors=None, knn_algo='ball_tree', verbose=False, allowed_extensions=['.jpg']):
     """
     Trains a k-nearest neighbors classifier for face recognition.
@@ -74,38 +76,26 @@ def train(train_dir,facenet_model='models/pretrained/graph.pb', model_save_path=
 
     emb = get_embeddings(facenet_model,images)
 
-    # GRAPH_PB_PATH = facenet_model
-    # fd_graph = tf.Graph()
-    # with fd_graph.as_default():
-    #     with tf.Session() as sess:
-    #         with tf.io.gfile.GFile(GRAPH_PB_PATH,'rb') as f:        
-    #             graph_def = tf.GraphDef()
-    #             graph_def.ParseFromString(f.read())
-    #         tf.import_graph_def(graph_def,name='')
-    #         images_placeholder = tf.get_default_graph().get_tensor_by_name("input:0")
-    #         embeddings = tf.get_default_graph().get_tensor_by_name("embeddings:0")
-    #         phase_train_placeholder = tf.get_default_graph().get_tensor_by_name("phase_train:0")
-
-    #         # Run forward pass to calculate embeddings
-    #         feed_dict = { images_placeholder: images, phase_train_placeholder:False }
-    #         emb = sess.run(embeddings, feed_dict=feed_dict)
-
     # Determine how many neighbors to use for weighting in the KNN classifier
     if n_neighbors is None:
         n_neighbors = int(round(math.sqrt(len(emb))))
         if verbose:
             print("Chose n_neighbors automatically:", n_neighbors)
 
-    # Create and train the KNN classifier
-    knn_clf = neighbors.KNeighborsClassifier(n_neighbors=n_neighbors, algorithm=knn_algo, weights='distance')
-    knn_clf.fit(emb, y)
+    
+    if classifier == 'KNN':
+        clf = neighbors.KNeighborsClassifier(n_neighbors=n_neighbors, algorithm=knn_algo, weights='distance')
+    elif classifier == 'SVC':
+    	clf = SVC()
+
+    clf.fit(emb, y)
 
     # Save the trained KNN classifier
     if model_save_path is not None:
         with open(model_save_path, 'wb') as f:
-            pickle.dump(knn_clf, f)
+            pickle.dump(clf, f)
 
-    return knn_clf
+    return clf
 
 
 
@@ -169,19 +159,84 @@ def get_embeddings(tf_model_path,images):
 
 
 
-def knn_predict(X,knn_clf=None, model_path=None):
+def predict(X,clf=None, model_path=None):
 
-    if knn_clf is None and model_path is None:
-        raise Exception("Must supply knn classifier either thourgh knn_clf or model_path")
+    if clf is None and model_path is None:
+        raise Exception("Must supply a classifier either thourgh clf or model_path")
 
     # Load a trained KNN model (if one was passed in)
-    if knn_clf is None:
+    if clf is None:
         with open(model_path, 'rb') as f:
-            knn_clf = pickle.load(f)
+            clf = pickle.load(f)
 
-    y = knn_clf.predict(X)
+    y = clf.predict(X)
     return(y)
 
 
+def get_faces(image_paths, image_size=70, margin=44, gpu_memory_fraction=1,detection_confidence=0.9):
+
+    minsize = 20 # minimum size of face
+    threshold = [ 0.6, 0.7, 0.7 ]  # three steps's threshold
+    factor = 0.709 # scale factor
+    
+    print('Creating networks and loading parameters')
+    with tf.Graph().as_default():
+        gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=gpu_memory_fraction)
+        sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options, log_device_placement=False))
+        with sess.as_default():
+            pnet, rnet, onet = align.detect_face.create_mtcnn(sess, None)
+  
+    tmp_image_paths=copy.copy(image_paths)
+    img_list = []
+    imgs_with_faces = []
+    output = []
+    for image in tmp_image_paths:
+        img = misc.imread(os.path.expanduser(image), mode='RGB')
+        img_size = np.asarray(img.shape)[0:2]
+        bounding_boxes, _ = align.detect_face.detect_face(img, minsize, pnet, rnet, onet, threshold, factor)
+        if len(bounding_boxes) < 1:
+          image_paths.remove(image)
+          print("can't detect face, remove ", image)
+          continue
+        output.append([image,bounding_boxes])
+
+    return output
 
 
+
+
+def get_face_labels(data,max_clusters=20, opt_cluster_threshold=8):
+
+
+    inertia = []
+    n_clusters = []
+    labels = []
+    for n in range(1,max_clusters+1):
+        kmeans = KMeans(n_clusters=n)
+        kmeans = kmeans.fit(data)
+        inertia.append(kmeans.inertia_)
+        n_clusters.append(n)
+        labels.append(kmeans.labels_)
+
+    for i in range(1,max_clusters-1):
+    
+        slope_prev = (inertia[i] - inertia[i-1])/ (n_clusters[i] - n_clusters[i-1])
+        slope_next = (inertia[i+1] - inertia[i])/ (n_clusters[i+1] - n_clusters[i])
+    
+        if (slope_next-slope_prev) < opt_cluster_threshold:
+            break
+
+    return(labels[i-1])
+
+
+def get_distinct_faces(embeddings,max_clusters=20, opt_cluster_threshold=8):
+
+    n_clusters = get_optimal_clusters(embeddings,max_clusters, opt_cluster_threshold)
+
+    kmeans = KMeans(n_clusters=n_clusters)
+    kmeans = kmeans.fit(embeddings)
+    return(kmeans.cluster_centers_)
+
+
+
+    

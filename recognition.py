@@ -37,7 +37,7 @@ images,img_with_faces = util.load_and_align_data(file_list)
 print("getting embeddings")
 embeddings = util.get_embeddings(args['model'],images)
 print("getting predictions")
-y = util.knn_predict(X=embeddings,model_path=args['prediction_model'])
+y = util.predict(X=embeddings,model_path=args['prediction_model'])
 
 if args['output'] != None:
 	i=0
