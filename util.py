@@ -282,4 +282,38 @@ def detect_faces_mtcnn(pnet,rnet,onet,image_paths, image_size=160, margin=44):
 
 
 
+# cluster for online streaming of data    
+class Classification_cluster:
+    def __init__(self,cluster_path=None):
+        
+        self.image_groups = []
+        
+    def match_face(self,embedding):
+        least_distance = 99
+        least_group_index = 0
+        grp_no = 0
+
+        for group in self.image_groups:
+            distance = np.sum(np.square(embedding - group[0])) 
+            if least_distance > distance:
+                least_distance = distance
+                least_group_index = grp_no 
+            grp_no += 1
+        return least_distance, least_group_index
+      
+    def add_vec(self,embedding,image, group_no=None):
+        
+        if group_no == None:
+            self.image_groups.append([embedding,1,[image]])                      
+            
+        else:
+            group = self.image_groups[group_no]
+            group[2].append(image)
+            group[1] += 1
+            group[0] = ((group[0]*(group[1]-1)) + embeddings[iteration])/group[1] 
     
+    def save_cluster(self,cluster_path):
+        pass
+        
+    def get_cluster(self):
+        return(self.image_groups)
