@@ -137,7 +137,33 @@ def load_and_align_data(image_paths, image_size=160, margin=44, gpu_memory_fract
     images = np.stack(img_list)
     return(images,imgs_with_faces)
 
-def get_embeddings(tf_model_path,images):
+def load_facenet(tf_model_path):
+
+    GRAPH_PB_PATH = tf_model_path
+    fd_graph = tf.Graph()
+    with fd_graph.as_default():
+        with tf.Session() as sess:
+            with tf.io.gfile.GFile(GRAPH_PB_PATH,'rb') as f:        
+                graph_def = tf.GraphDef()
+                graph_def.ParseFromString(f.read())
+            tf.import_graph_def(graph_def,name='')
+    return(fd_graph)
+
+def get_embeddings(graph,images):
+
+    with fd_graph.as_default():
+        with tf.Session() as sess:
+
+            images_placeholder = tf.get_default_graph().get_tensor_by_name("input:0")
+            embeddings = tf.get_default_graph().get_tensor_by_name("embeddings:0")
+            phase_train_placeholder = tf.get_default_graph().get_tensor_by_name("phase_train:0")
+
+            # Run forward pass to calculate embeddings
+            feed_dict = { images_placeholder: images, phase_train_placeholder:False }
+            emb = sess.run(embeddings, feed_dict=feed_dict)
+
+
+def load_and_get_embeddings(tf_model_path,images):
 
     GRAPH_PB_PATH = tf_model_path
     fd_graph = tf.Graph()
@@ -278,5 +304,33 @@ def detect_faces_mtcnn(pnet,rnet,onet,image_paths, image_size=160, margin=44):
         img_list.append(prewhitened)
     images = np.stack(img_list)
     return(images,imgs_with_faces)
+
+
+class Facenet_encoder():
+    def __init__(self, tf_model_path):
+
+        GRAPH_PB_PATH = tf_model_path
+        fd_graph = tf.Graph()
+        with fd_graph.as_default():
+            with tf.Session() as sess:
+                with tf.io.gfile.GFile(GRAPH_PB_PATH,'rb') as f:        
+                    graph_def = tf.GraphDef()
+                    graph_def.ParseFromString(f.read())
+                tf.import_graph_def(graph_def,name='')
+        self.graph = fd_graph
+
+    def get_embeddings(self,images):
+
+        with self.graph.as_default():
+            with tf.Session() as sess:
+
+                images_placeholder = tf.get_default_graph().get_tensor_by_name("input:0")
+                embeddings = tf.get_default_graph().get_tensor_by_name("embeddings:0")
+                phase_train_placeholder = tf.get_default_graph().get_tensor_by_name("phase_train:0")
+
+                # Run forward pass to calculate embeddings
+                feed_dict = { images_placeholder: images, phase_train_placeholder:False }
+                emb = sess.run(embeddings, feed_dict=feed_dict)
+        return(emb)
 
 
